@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Polygon Arbitrage Bot</title>
+  <style>
+    body {
+      font-family: 'Courier New', monospace;
+      background-color: #121212;
+      color: #00ff00;
+      margin: 0;
+      padding: 20px;
+    }
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+      border: 1px solid #333;
+      padding: 20px;
+      background-color: #000;
+    }
+    h1 {
+      color: #00ff00;
+      text-align: center;
+      border-bottom: 1px solid #333;
+      padding-bottom: 10px;
+    }
+    .panel {
+      background-color: #1a1a1a;
+      padding: 15px;
+      margin-bottom: 20px;
+      border: 1px solid #333;
+    }
+    label {
+      display: block;
+      margin: 10px 0 5px;
+    }
+    input, select, button {
+      background-color: #000;
+      color: #00ff00;
+      border: 1px solid #333;
+      padding: 8px;
+      width: 100%;
+      margin-bottom: 10px;
+    }
+    button {
+      background-color: #003300;
+      cursor: pointer;
+      transition: background-color 0.3s;
+    }
+    button:hover {
+      background-color: #006600;
+    }
+    button:disabled {
+      background-color: #333;
+      cursor: not-allowed;
+    }
+    #status {
+      height: 200px;
+      overflow-y: scroll;
+      border: 1px solid #333;
+      padding: 10px;
+      background-color: #000;
+      font-family: 'Courier New', monospace;
+    }
+    .wallet-info {
+      margin-bottom: 20px;
+      padding: 10px;
+      background-color: #1a1a1a;
+      border: 1px solid #333;
+    }
+    .profit-display {
+      font-size: 1.2em;
+      margin: 15px 0;
+      padding: 10px;
+      background-color: #1a1a1a;
+      border: 1px solid #00aa00;
+    }
+    .gas-controls {
+      display: flex;
+      gap: 10px;
+    }
+    .gas-controls input {
+      flex: 1;
+    }
+    .token-balance {
+      font-size: 0.9em;
+      color: #aaa;
+      margin-top: -8px;
+      margin-bottom: 10px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Polygon Arbitrage Bot</h1>
+    <button id="connectWalletBtn">Connect Wallet</button>
+
+    <div class="wallet-info">
+      <div>Connected Wallet: <span id="walletAddress">Not connected</span></div>
+      <div>Network: <span id="network">Unknown</span></div>
+      <div>USDC Balance: <span id="usdcBalance">0.00</span></div>
+    </div>
+
+    <div class="profit-display">
+      Total Profits: <span id="totalProfit">$0.00</span> USDC
+      <div class="token-balance">Contract Balance: <span id="contractBalance">0.00</span> USDC</div>
+    </div>
+
+    <div class="panel">
+      <h3>Arbitrage Configuration</h3>
+      <label>Token Pair:</label>
+      <select id="tokenPair">
+        <option value="0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174-0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619">USDC-WETH</option>
+        <option value="0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174-0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270">USDC-WMATIC</option>
+      </select>
+
+      <label>Amount (USDC):</label>
+      <input type="number" id="loanAmount" placeholder="1000" value="1000" min="100" step="100">
+      <div class="token-balance">Available: <span id="availableBalance">0.00</span> USDC</div>
+
+      <label>Flashloan Provider:</label>
+      <select id="flashLoanProvider">
+        <option value="aave">Aave</option>
+        <option value="dodo">DODO</option>
+      </select>
+
+      <div class="gas-controls">
+        <div>
+          <label>Gas Price (Gwei):</label>
+          <input type="number" id="gasPrice" placeholder="Auto" min="1" step="1">
+        </div>
+        <div>
+          <label>Gas Limit:</label>
+          <input type="number" id="gasLimit" placeholder="Auto" min="100000" step="10000">
+        </div>
+      </div>
+
+      <button id="startBtn" disabled>Start Arbitrage</button>
+      <button id="withdrawBtn" disabled>Withdraw Profits</button>
+    </div>
+
+    <div class="panel">
+      <h3>Transaction Status</h3>
+      <div id="status"></div>
+    </div>
+  </div>
+
+  <script src="https://cdn.ethers.io/lib/ethers-5.2.umd.min.js"></script>
+  <script>
+    const USDC_ADDRESS = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"; // Polygon USDC
+    const USDC_ABI = [
+      "function balanceOf(address owner) view returns (uint256)",
+      "function decimals() view returns (uint8)"
+    ];
+
+    // 🔧 Your Contract Info Here
+    const CONTRACT_ABI = [ /* ✅ INSERT YOUR ABI HERE */ ];
+    const CONTRACT_ADDRESS = "0xYourDeployedContractAddress"; // ✅ Replace with your deployed contract
+
+    let provider, signer, address, usdcContract, contract;
+
+    document.getElementById('connectWalletBtn').addEventListener('click', async () => {
+      if (typeof window.ethereum !== 'undefined') {
+        try {
+          await window.ethereum.request({ method: 'eth_requestAccounts' });
+          provider = new ethers.providers.Web3Provider(window.ethereum);
+          signer = provider.getSigner();
+          address = await signer.getAddress();
+          const network = await provider.getNetwork();
+
+          document.getElementById('walletAddress').textContent = address.slice(0, 6) + '...' + address.slice(-4);
+          document.getElementById('network').textContent = network.name || 'Unknown';
+
+          usdcContract = new ethers.Contract(USDC_ADDRESS, USDC_ABI, provider);
+          contract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, signer);
+
+          document.getElementById('startBtn').disabled = false;
+          document.getElementById('withdrawBtn').disabled = false;
+
+          fetchUSDCBalance();
+          setInterval(fetchUSDCBalance, 10000); // Auto-refresh every 10 seconds
+        } catch (err) {
+          console.error("Wallet connection failed:", err);
+        }
+      } else {
+        alert("MetaMask is not installed. Please install MetaMask.");
+      }
+    });
+
+    async function fetchUSDCBalance() {
+      try {
+        const decimals = await usdcContract.decimals();
+        const balance = await usdcContract.balanceOf(address);
+        const formatted = (Number(balance) / 10 ** decimals).toFixed(2);
+        document.getElementById('usdcBalance').textContent = formatted;
+        document.getElementById('availableBalance').textContent = formatted;
+
+        const contractBal = await usdcContract.balanceOf(CONTRACT_ADDRESS);
+        const formattedContract = (Number(contractBal) / 10 ** decimals).toFixed(2);
+        document.getElementById('contractBalance').textContent = formattedContract;
+      } catch (e) {
+        console.error("Balance fetch error:", e);
+      }
+    }
+
+    document.getElementById('startBtn').addEventListener('click', async () => {
+      try {
+        const amount = document.getElementById('loanAmount').value;
+        const parsedAmount = ethers.utils.parseUnits(amount, 6); // USDC = 6 decimals
+        const tx = await contract.startArbitrage(parsedAmount);
+        logStatus("⏳ Sent startArbitrage tx: " + tx.hash);
+        await tx.wait();
+        logStatus("✅ Arbitrage completed: " + tx.hash);
+        fetchUSDCBalance();
+      } catch (e) {
+        logStatus("❌ Arbitrage failed: " + e.message);
+        console.error(e);
+      }
+    });
+
+    document.getElementById('withdrawBtn').addEventListener('click', async () => {
+      try {
+        const tx = await contract.withdrawProfits();
+        logStatus("⏳ Sent withdrawProfits tx: " + tx.hash);
+        await tx.wait();
+        logStatus("✅ Profits withdrawn: " + tx.hash);
+        fetchUSDCBalance();
+      } catch (e) {
+        logStatus("❌ Withdrawal failed: " + e.message);
+        console.error(e);
+      }
+    });
+
+    function logStatus(message) {
+      const statusBox = document.getElementById('status');
+      statusBox.innerHTML += message + "<br>";
+      statusBox.scrollTop = statusBox.scrollHeight;
+    }
+  </script>
+</body>
+</html>
